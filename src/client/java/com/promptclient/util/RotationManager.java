@@ -205,6 +205,15 @@ public final class RotationManager {
 		}
 
 		if (!hasGoal) {
+			// Teleports, portals and spawn snaps can move the camera far outside our turn budget. Snap the
+			// server rotation to it instead of crawling there and desyncing movement for seconds.
+			float cameraGap = MathHelper.wrapDegrees(player.getYaw() - serverYaw);
+
+			if (Math.abs(cameraGap) > 90.0f) {
+				serverYaw = player.getYaw();
+				yawRemainder = 0.0f;
+			}
+
 			goalYaw = player.getYaw();
 			goalPitch = player.getPitch();
 		}
@@ -248,7 +257,9 @@ public final class RotationManager {
 			}
 		}
 
-		serverYaw = MathHelper.wrapDegrees(serverYaw + stepYaw);
+		// Vanilla yaw is unbounded; wrapping it makes clockwise turns snap ~360 at the ±180 edge
+		// (Grim AimModulo360) and desyncs the client-side movement rotation space.
+		serverYaw += stepYaw;
 
 		float newPitch = serverPitch + stepPitch;
 
@@ -327,8 +338,9 @@ public final class RotationManager {
 		float forward = input.movementForward;
 		float sideways = input.movementSideways;
 
-		input.movementForward = forward * cos - sideways * sin;
-		input.movementSideways = sideways * cos + forward * sin;
+		input.movementForward = forward * cos + sideways * sin;
+		input.movementSideways = sideways * cos - forward * sin;
+
 	}
 
 	/**

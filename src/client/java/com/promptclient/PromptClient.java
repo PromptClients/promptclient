@@ -28,6 +28,10 @@ public final class PromptClient implements ClientModInitializer {
 		ClientTickEvents.END_CLIENT_TICK.register(MODULE_MANAGER::onTick);
 		HudRenderCallback.EVENT.register(new HudRenderer(MODULE_MANAGER));
 
+		if (DevHarness.shouldRun()) { // TEMP-HARNESS
+			DevHarness.register(); // TEMP-HARNESS
+		} // TEMP-HARNESS
+
 		LOGGER.info("{} initialized with {} module(s)", NAME, MODULE_MANAGER.getModules().size());
 	}
 

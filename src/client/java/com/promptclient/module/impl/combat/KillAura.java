@@ -96,7 +96,7 @@ public final class KillAura extends Module {
 	private final NumberSetting range = addSetting(new NumberSetting("Range",
 			"Attack reach in blocks.", 3.0, 1.0, 6.0, 0.05));
 	private final NumberSetting wallRange = addSetting(new NumberSetting("Wall Range",
-			"Reach through blocks; 0 disables.", 0.0, 0.0, 4.5, 0.05));
+			"Reach through blocks; 0 = exact line of sight.", 3.0, 0.0, 4.5, 0.05));
 	private final NumberSetting fov = addSetting(new NumberSetting("FOV",
 			"Horizontal target cone.", 180.0, 10.0, 360.0, 5.0).suffix("°"));
 	private final BooleanSetting players = addSetting(new BooleanSetting("Players", "Target players.", true));
@@ -104,7 +104,7 @@ public final class KillAura extends Module {
 	private final BooleanSetting passives = addSetting(new BooleanSetting("Passives", "Target animals.", false));
 	private final BooleanSetting invisibles = addSetting(new BooleanSetting("Invisibles", "Target invisible entities.", false));
 	private final BooleanSetting ignoreTeams = addSetting(new BooleanSetting("Teams",
-			"Skip teammates and same armor color.", true));
+			"Skip teammates and same armor color.", false));
 	private final BooleanSetting antiBot = addSetting(new BooleanSetting("Anti-Bot",
 			"Skip fresh, tab-less or hovering entities.", false));
 
@@ -172,7 +172,11 @@ public final class KillAura extends Module {
 	private long nextAttackMs;
 	private int multiCursor;
 	private int debugAttacks;
+	private String debugState = "-";
+	private float debugCd;
+	private float debugThreshold;
 	private boolean resumeSprint;
+	private boolean pendingSprintStop;
 	private boolean resumeSprintPacket;
 
 	public KillAura() {
@@ -200,6 +204,7 @@ public final class KillAura extends Module {
 		attackTargets.clear();
 		resumeSprint = false;
 		resumeSprintPacket = false;
+		pendingSprintStop = false;
 		nextAttackMs = 0L;
 	}
 
@@ -235,8 +240,21 @@ public final class KillAura extends Module {
 			attackNow(); // uses the rotation already sent this tick, never the next one
 		}
 
+		// The reset has to follow this tick's movement packet. Sending STOP before it makes the server
+		// simulate a non-sprint tick with sprint-speed movement (Grim Simulation / prediction flags).
+		flushSprintStop(player);
 		rotation.tick();
 	}
+
+	public String debugState() { return debugState; }
+
+	public int debugAttacks() { return debugAttacks; }
+
+	public float debugCd() { return debugCd; }
+
+	public float debugThreshold() { return debugThreshold; }
+
+	public String debugAttackMode() { return attackMode.getMode(); }
 
 	// ---------------------------------------------------------------- targeting
 
@@ -405,18 +423,23 @@ public final class KillAura extends Module {
 
 		if (player == null || client().world == null || client().interactionManager == null
 				|| currentTarget == null || !isValidTarget(currentTarget)) {
+			debugState = "no target";
 			return;
 		}
 
 		if (pauseEating.getValue() && player.isUsingItem()) {
+			debugState = "eating";
 			return;
 		}
 
 		long now = Util.getMeasuringTimeMs();
 
 		if (now < nextAttackMs) {
+			debugState = "delay";
 			return;
 		}
+
+		debugCd = player.getAttackCooldownProgress(0.5f);
 
 		if (attackMode.getIndex() == 0) {
 			float threshold = (float) cooldownThreshold.getValue();
@@ -425,7 +448,10 @@ public final class KillAura extends Module {
 				threshold = MathHelper.clamp(threshold + (float) random.nextGaussian() * 0.02f, 0.75f, 1.0f);
 			}
 
-			if (player.getAttackCooldownProgress(0.5f) < threshold) {
+			debugThreshold = threshold;
+
+			if (debugCd < threshold) {
+				debugState = "cooldown";
 				return;
 			}
 		}
@@ -452,9 +478,11 @@ public final class KillAura extends Module {
 		}
 
 		if (attackTargets.isEmpty()) {
+			debugState = strictRaycast.getValue() ? "ray" : "range";
 			return;
 		}
 
+		debugState = "hit";
 		applySprintReset(player);
 
 		for (int i = 0; i < attackTargets.size(); i++) {
@@ -502,6 +530,21 @@ public final class KillAura extends Module {
 
 	private void applySprintReset(ClientPlayerEntity player) {
 		if (!player.isSprinting() || sprintReset.getIndex() == SPRINT_NONE) {
+			return;
+		}
+
+		pendingSprintStop = true;
+	}
+
+	/** Executes a queued reset after the movement packet of the attack tick. */
+	private void flushSprintStop(ClientPlayerEntity player) {
+		if (!pendingSprintStop) {
+			return;
+		}
+
+		pendingSprintStop = false;
+
+		if (!player.isSprinting()) {
 			return;
 		}
 
@@ -567,13 +610,13 @@ public final class KillAura extends Module {
 		switchDelay.setValue(250.0);
 		sortPriority.setMode("Distance");
 		range.setValue(3.0);
-		wallRange.setValue(0.0);
+		wallRange.setValue(3.0);
 		fov.setValue(180.0);
 		players.setValue(true);
 		hostiles.setValue(true);
 		passives.setValue(false);
 		invisibles.setValue(false);
-		ignoreTeams.setValue(true);
+		ignoreTeams.setValue(false);
 		antiBot.setValue(false);
 		attackMode.setMode("1.9+");
 		cooldownThreshold.setValue(0.95);
@@ -623,7 +666,7 @@ public final class KillAura extends Module {
 			}
 			case 4 -> { // Vulcan / Matrix
 				range.setValue(3.05);
-				wallRange.setValue(0.5);
+				wallRange.setValue(3.0);
 				fov.setValue(130.0);
 				cooldownThreshold.setValue(0.95);
 				humanVariance.setValue(true);
@@ -685,7 +728,7 @@ public final class KillAura extends Module {
 						+ "  hits: " + debugAttacks, x, y + 44, 0xFFFFFFFF);
 		context.drawTextWithShadow(client().textRenderer,
 				"mode: " + rotationMode.getMode() + "  order: " + (packetOrder.getValue() ? "pre" : "post")
-						+ "  bot: " + antiBot.getValue(), x, y + 55, 0xFFFFFFFF);
+						+ "  bot: " + antiBot.getValue() + "  state: " + debugState, x, y + 55, 0xFFFFFFFF);
 	}
 
 	// ---------------------------------------------------------------- target ring
