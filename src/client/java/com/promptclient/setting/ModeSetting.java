@@ -1,6 +1,7 @@
 package com.promptclient.setting;
 
 import java.util.List;
+import java.util.function.IntConsumer;
 import java.util.function.Supplier;
 
 /** One choice out of a fixed list of modes. Left-click cycles forward in the GUI, right-click backward. */
@@ -8,6 +9,7 @@ public final class ModeSetting extends Setting {
 	private final List<String> modes;
 	private String currentMode;
 	private int index;
+	private IntConsumer changeListener;
 
 	public ModeSetting(String name, String description, String defaultMode, String... modes) {
 		super(name, description);
@@ -46,12 +48,26 @@ public final class ModeSetting extends Setting {
 
 		index = newIndex;
 		currentMode = modes.get(newIndex);
+		fireChanged();
 	}
 
 	/** Moves {@code direction} steps through the list, wrapping around. */
 	public void cycle(int direction) {
 		index = Math.floorMod(index + direction, modes.size());
 		currentMode = modes.get(index);
+		fireChanged();
+	}
+
+	/** Runs {@code listener} with the new index whenever the mode changes (e.g. to apply presets). */
+	public ModeSetting onChange(IntConsumer listener) {
+		this.changeListener = listener;
+		return this;
+	}
+
+	private void fireChanged() {
+		if (changeListener != null) {
+			changeListener.accept(index);
+		}
 	}
 
 	public ModeSetting visibleWhen(Supplier<Boolean> visibility) {

@@ -42,9 +42,10 @@ src/client/java/com/promptclient/
   module/Module.java                    abstract base: name, description, category, keyCode, enabled, settings
   module/Category.java                  RENDER, MOVEMENT, COMBAT, PLAYER, MISC
   module/ModuleManager.java             registry, lookups, keybind polling, per-tick dispatch
-  module/impl/<category>/<Name>.java    one class per module (render/: Fullbright, Hud, Chat; misc/: ClickGui)
+  module/impl/<category>/<Name>.java    one class per module (combat/: KillAura; render/: Fullbright, Hud, Chat; misc/: ClickGui)
   setting/                              Setting (base), BooleanSetting, NumberSetting, ModeSetting
-  mixin/<Target>Mixin.java              Mixins (client side): ChatHudMixin, LightmapTextureManagerMixin
+  util/RotationManager.java             server-rotation controller: silent rotations, GCD, MoveFix, server raycasts
+  mixin/<Target>Mixin.java              Mixins (client side): ChatHudMixin, ClientPlayerEntityMixin, KeyboardInputMixin, LightmapTextureManagerMixin
   ui/Theme.java                         palette + Theme.accent() (from the ClickGUI module's Accent setting)
   ui/HudRenderer.java                   HudRenderCallback: glass watermark badge (8,8) + animated module list
   ui/ChatRenderer.java                  chat card drawing + new-message slide/fade (called by ChatHudMixin)
@@ -97,6 +98,17 @@ src/client/resources/promptclient.mixins.json
    - **There is no refmap, and that is expected.** Loom 1.17 remaps Mixin annotation strings directly inside `remapJar`. Don't add a `"refmap"` key.
 7. **Rendering:** see "Rendering and performance rules" below. In 1.21.1 `HudRenderCallback` gets a `RenderTickCounter`, not a `float`. HUD and GUI code goes in `ui/`.
 8. Use `PromptClient.LOGGER` for logging. Don't use `System.out`.
+
+## Combat and rotations
+
+`util/RotationManager` owns every server-facing rotation. Modules call `configure(...)` and `aimAt(...)` each tick, then `tick()`; never write `yaw`/`pitch` around a packet by hand.
+
+- **Silent rotations:** `ClientPlayerEntityMixin` injects at `HEAD`/`RETURN` of `sendMovementPackets`. HEAD runs the optional pre-movement task (attack-before-packet ordering), then pushes the spoofed yaw/pitch; RETURN restores the visible camera values. Never keep spoofed values in place after the call.
+- **Third-person model:** `RotationManager#tick` also eases `renderYaw`/`renderPitch` (and their `last*` fields) so the F5 body follows the server rotation without moving the first-person camera. On release, vanilla `tickNewAi` eases them back.
+- **GCD:** all deltas are snapped to the vanilla mouse step `(sens * 0.6 + 0.2)^3 * 1.2`. Remainders carry between ticks so slow turns still advance and every packet delta stays a multiple of the step. Keep `options.getMouseSensitivity()` as the only source.
+- **MoveFix:** `KeyboardInputMixin` injects at `RETURN` of `KeyboardInput#tick` and rotates `movementForward`/`movementSideways` by `serverYaw - playerYaw`. It must run after vanilla samples the keys but before `tickNewAi` copies the fields into `sidewaysSpeed`/`forwardSpeed`; injecting into `ClientPlayerEntity#tickMovement` would be too late for the copy.
+- **Raycasts:** `RotationManager#canSee` builds the direction from the current *server* rotation, raycasts the expanded hitbox, and only then checks block occlusion (honouring `wallRange`). Strict raycast must never use the camera rotation.
+- **Reuse:** combat and world modules share this manager. Reset it with `release()` from `onDisable`, and push settings every tick; don't keep module-specific rotation state in a second place.
 
 ## Rendering and performance rules
 

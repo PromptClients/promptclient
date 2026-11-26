@@ -9,6 +9,7 @@ PromptClient is a clean base for client features: a module system with settings 
 | Module     | Category | Default key   | What it does |
 |------------|----------|---------------|--------------|
 | ClickGUI   | Misc     | `Right Shift` | Opens the settings menu. **Accent** sets the highlight color everywhere. |
+| KillAura   | Combat   | `R`           | Attacks valid targets with silent rotations, GCD/MoveFix, strict server raycasts, cooldown or APS timing, target ESP and anti-cheat presets. |
 | Fullbright | Render   | `G`           | Lights up caves and dark areas. **Mode**: Lightmap (flat, maximum), Gamma (adjustable, keeps some shading), or NightVision. |
 | HUD        | Render   | on by default | Glass watermark badge with version and FPS, plus a list of enabled modules (top right, or under the badge). |
 | Chat       | Render   | on by default | Replaces the flat chat background with a rounded translucent card. New messages slide and fade in. Turn it off for vanilla chat. |
@@ -25,6 +26,20 @@ Press **Right Shift** to open it. The game keeps running while it's open.
 - **Type** anywhere to filter modules. **Esc** clears the search, then closes the GUI.
 - **Bind** row: click it, then press a key. **Esc** or **Delete** unbinds, and right-click also clears the binding.
 - Mode settings: left-click for the next mode, right-click for the previous one.
+
+## KillAura
+
+KillAura (`R`) is built for single-player and local anti-cheat testing. The **Preset** row fills every setting from a profile; pick **Custom** to keep the current values instead.
+
+| Preset | Profile |
+|--------|---------|
+| Legit | Strict 3.0 reach, full cooldown, raycast, GCD + MoveFix, human turn speed, 90° FOV. |
+| Grim | Strict raycast and move correction, natural mouse curve, attacks before movement packets. |
+| Polar | GCD with gaussian micro-jitter, closest-hitbox aim, post-hit timing variance, 110° FOV. |
+| Vulcan | 3.05 reach, packet-order-safe swings, smooth acceleration/deceleration, gaussian delays. |
+| Blatant | 4.5 reach, 360° FOV, multi-target, instant snap, through walls. |
+
+Presets are ordinary settings, so tweak anything afterwards. **Rotate** Silent spoofs only the server look (the camera stays put); **Lock View** turns the camera; **None** only attacks. **Raycast** strict uses the server-side crosshair, not the visible one. Target ESP draws the ring in world space and is allocation-free.
 
 ## Requirements
 
@@ -60,7 +75,8 @@ src/
     │   ├── PromptClient.java                 # entrypoint: registers modules, tick + HUD callbacks
     │   ├── module/                           # Module, Category, ModuleManager, impl/<category>/...
     │   ├── setting/                          # BooleanSetting, NumberSetting, ModeSetting
-    │   ├── mixin/                            # ChatHudMixin, LightmapTextureManagerMixin
+    │   ├── util/RotationManager.java         # silent rotations, GCD, MoveFix, server raycasts
+    │   ├── mixin/                            # ChatHud, ClientPlayerEntity, KeyboardInput, Lightmap mixins
     │   └── ui/
     │       ├── clickgui/                     # ClickGuiScreen, panels, module rows, setting widgets
     │       ├── render/                       # RenderUtils (batched 2D primitives), Colors

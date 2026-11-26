@@ -1,6 +1,7 @@
 package com.promptclient;
 
 import com.promptclient.module.ModuleManager;
+import com.promptclient.module.impl.combat.KillAura;
 import com.promptclient.module.impl.misc.ClickGui;
 import com.promptclient.module.impl.render.Chat;
 import com.promptclient.module.impl.render.Fullbright;
@@ -32,6 +33,9 @@ public final class PromptClient implements ClientModInitializer {
 
 	/** Every module is registered here, one line each. Chain {@code .setEnabled(true)} for on-by-default modules. */
 	private static void registerModules() {
+		// Combat
+		MODULE_MANAGER.register(new KillAura());
+
 		// Render
 		MODULE_MANAGER.register(new Fullbright());
 		MODULE_MANAGER.register(new Hud()).setEnabled(true);
