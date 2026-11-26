@@ -1,0 +1,32 @@
+{
+	"schemaVersion": 1,
+	"id": "promptclient",
+	"version": "${version}",
+	"name": "PromptClient",
+	"description": "A lightweight, modular client mod for Minecraft 1.21.1.",
+	"authors": [
+		"PromptClients"
+	],
+	"contact": {
+		"sources": "https://github.com/PromptClients/promptclient",
+		"issues": "https://github.com/PromptClients/promptclient/issues"
+	},
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"com.promptclient.PromptClient"
+		]
+	},
+	"mixins": [
+		{
+			"config": "promptclient.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "1.21.1",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}

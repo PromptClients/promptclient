@@ -1,0 +1,40 @@
+# Gradle
+.gradle/
+build/
+out/
+classes/
+
+# Fabric / Minecraft dev runtime
+run/
+logs/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Eclipse
+.settings/
+.classpath
+.project
+.factorypath
+bin/
+*.launch
+
+# VS Code
+.vscode/
+
+# Claude Code (local, per-user settings only — CLAUDE.md is tracked)
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Java crash / profiler output
+hs_err_*.log
+replay_*.log
+*.hprof
+*.jfr
