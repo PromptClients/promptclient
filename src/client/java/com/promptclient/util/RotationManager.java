@@ -148,6 +148,12 @@ public final class RotationManager {
 		double y;
 		double z;
 
+		// Up close the "closest point" jumps between opposite box faces as the bodies overlap; that
+		// flip-flops the yaw 60-70 degrees per tick and movement prediction cannot follow. Center is stable.
+		if (aimPoint != 2 && eye.distanceTo(box.getCenter()) < 2.2) {
+			aimPoint = 1;
+		}
+
 		switch (aimPoint) {
 			case 1 -> { // chest / center
 				x = centerX;
@@ -364,7 +370,6 @@ public final class RotationManager {
 
 		input.movementForward = forward * cos + sideways * sin;
 		input.movementSideways = sideways * cos - forward * sin;
-
 	}
 
 	/**

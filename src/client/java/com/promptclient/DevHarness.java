@@ -59,6 +59,10 @@ public final class DevHarness {
 						if (setting instanceof com.promptclient.setting.ModeSetting mode && mode.getName().equals("Preset")) {
 							mode.setMode("Grim");
 						}
+						if (setting instanceof com.promptclient.setting.ModeSetting mode && mode.getName().equals("Rotate")) {
+							mode.setMode("Silent");
+						}
+
 					}
 
 					PromptClient.getModuleManager().get(KillAura.class).setEnabled(true);
@@ -81,7 +85,8 @@ public final class DevHarness {
 				if (ticks < 1) {
 					client.options.forwardKey.setPressed(true);
 					client.options.leftKey.setPressed(true);
-					client.options.jumpKey.setPressed(ticks % 12 == 0);
+					client.options.sprintKey.setPressed(true);
+					client.options.jumpKey.setPressed(ticks % 200 == 0);
 
 					if (ticks % 2 == 0) {
 						client.player.setYaw(client.player.getYaw() + 3.0f);
@@ -96,10 +101,11 @@ public final class DevHarness {
 					}
 
 					var nearest = client.world.getEntitiesByClass(net.minecraft.entity.LivingEntity.class,
-							client.player.getBoundingBox().expand(16.0), other -> other != client.player && (other instanceof net.minecraft.entity.mob.MobEntity || other instanceof net.minecraft.entity.player.PlayerEntity)).stream()
+							client.player.getBoundingBox().expand(48.0), other -> other != client.player && (other instanceof net.minecraft.entity.mob.MobEntity || other instanceof net.minecraft.entity.player.PlayerEntity)).stream()
 							.min(java.util.Comparator.comparingDouble(client.player::distanceTo)).orElse(null);
 
 					if (nearest != null) {
+						client.options.sprintKey.setPressed(true);
 						PromptClient.LOGGER.info("AUTOTEST seek {} d={} reject={}", nearest.getType().getName().getString(),
 								client.player.distanceTo(nearest),
 								PromptClient.getModuleManager().get(KillAura.class).debugReject(nearest));
@@ -108,22 +114,26 @@ public final class DevHarness {
 						float targetYaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
 						targetYaw += (float) (Math.sin(ticks * 0.25) * 6.0);
 						client.player.setYaw(targetYaw);
-						client.options.forwardKey.setPressed(client.player.distanceTo(nearest) > 2.0);
+						client.options.forwardKey.setPressed(client.player.distanceTo(nearest) > 2.2);
 						client.options.leftKey.setPressed(false);
-						client.options.jumpKey.setPressed(ticks % 12 == 0);
+						client.options.jumpKey.setPressed(ticks % 200 == 0);
+					} else {
+						client.options.forwardKey.setPressed(false);
+						client.options.sprintKey.setPressed(false);
+						client.options.jumpKey.setPressed(false);
 					}
 				}
 
-				if (ticks % 10 == 0) {
-					double dx = client.player.getX() - lastX;
-					double dz = client.player.getZ() - lastZ;
-					if (dx * dx + dz * dz > 1.0E-6) {
-						PromptClient.LOGGER.info("MOVE dir={} speed={}", Math.toDegrees(Math.atan2(-dx, dz)),
-								Math.sqrt(dx * dx + dz * dz));
-					}
-					lastX = client.player.getX();
-					lastZ = client.player.getZ();
+				double dx = client.player.getX() - lastX;
+				double dz = client.player.getZ() - lastZ;
+
+				if (dx * dx + dz * dz > 1.0E-6) {
+					PromptClient.LOGGER.info("MOVE dir={} speed={}", Math.toDegrees(Math.atan2(-dx, dz)),
+							Math.sqrt(dx * dx + dz * dz));
 				}
+
+				lastX = client.player.getX();
+				lastZ = client.player.getZ();
 
 				if (++ticks % 40 == 0) {
 					int total = 0;

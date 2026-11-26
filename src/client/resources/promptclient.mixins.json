@@ -8,6 +8,7 @@
 		"ClientPlayerEntityMixin",
 		"KeyboardInputMixin",
 		"LightmapTextureManagerMixin",
+		"LivingEntityMixin",
 		"MinecraftClientMixin"
 	],
 	"injectors": {

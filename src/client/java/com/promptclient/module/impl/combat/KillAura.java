@@ -25,7 +25,6 @@ import net.minecraft.entity.SpawnGroup;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.mob.Monster;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Util;
@@ -175,9 +174,6 @@ public final class KillAura extends Module {
 	private String debugState = "-";
 	private float debugCd;
 	private float debugThreshold;
-	private boolean resumeSprint;
-	private boolean pendingSprintStop;
-	private boolean resumeSprintPacket;
 
 	public KillAura() {
 		super("KillAura", "Automatically attacks entities in range.", Category.COMBAT, GLFW.GLFW_KEY_R);
@@ -202,9 +198,6 @@ public final class KillAura extends Module {
 		currentTarget = null;
 		candidates.clear();
 		attackTargets.clear();
-		resumeSprint = false;
-		resumeSprintPacket = false;
-		pendingSprintStop = false;
 		nextAttackMs = 0L;
 	}
 
@@ -234,15 +227,12 @@ public final class KillAura extends Module {
 			rotation.clearGoal();
 		}
 
-		resumeSprintIfNeeded(player);
-
 		if (!packetOrder.getValue()) {
 			attackNow(); // uses the rotation already sent this tick, never the next one
 		}
 
-		// The reset has to follow this tick's movement packet. Sending STOP before it makes the server
-		// simulate a non-sprint tick with sprint-speed movement (Grim Simulation / prediction flags).
-		flushSprintStop(player);
+		// Sprint packets are left to vanilla sendSprintingPacket: it emits them inside the movement packet,
+		// so they precede the flying packet and never duplicate (Grim BadPacketsF / Post).
 		rotation.tick();
 	}
 
@@ -552,52 +542,7 @@ public final class KillAura extends Module {
 			return;
 		}
 
-		pendingSprintStop = true;
-	}
-
-	/** Executes a queued reset after the movement packet of the attack tick. */
-	private void flushSprintStop(ClientPlayerEntity player) {
-		if (!pendingSprintStop) {
-			return;
-		}
-
-		pendingSprintStop = false;
-
-		if (!player.isSprinting()) {
-			return;
-		}
-
-		boolean packet = sprintReset.getIndex() == SPRINT_PACKET;
-
-		if (packet && client().getNetworkHandler() != null) {
-			client().getNetworkHandler().sendPacket(
-					new ClientCommandC2SPacket(player, ClientCommandC2SPacket.Mode.STOP_SPRINTING));
-		}
-
 		player.setSprinting(false);
-		((ClientPlayerEntityAccess) player).promptclient$setLastSprinting(false);
-		resumeSprint = true;
-		resumeSprintPacket = packet;
-	}
-
-	private void resumeSprintIfNeeded(ClientPlayerEntity player) {
-		if (!resumeSprint) {
-			return;
-		}
-
-		resumeSprint = false;
-		boolean packet = resumeSprintPacket;
-		resumeSprintPacket = false;
-		player.setSprinting(true);
-
-		if (packet) {
-			if (client().getNetworkHandler() != null) {
-				client().getNetworkHandler().sendPacket(
-						new ClientCommandC2SPacket(player, ClientCommandC2SPacket.Mode.START_SPRINTING));
-			}
-
-			((ClientPlayerEntityAccess) player).promptclient$setLastSprinting(true);
-		}
 	}
 
 	private void scheduleNextAttack(long now) {
@@ -646,8 +591,8 @@ public final class KillAura extends Module {
 		pauseEating.setValue(true);
 		rotationMode.setMode("Silent");
 		aimPoint.setMode("Closest");
-		minTurn.setValue(25.0);
-		maxTurn.setValue(70.0);
+		minTurn.setValue(12.0);
+		maxTurn.setValue(25.0);
 		gcdFix.setValue(true);
 		moveFix.setValue(true);
 		strictRaycast.setValue(true);
@@ -663,15 +608,15 @@ public final class KillAura extends Module {
 				fov.setValue(90.0);
 				cooldownThreshold.setValue(1.0);
 				aimPoint.setMode("Center");
-				minTurn.setValue(35.0);
-				maxTurn.setValue(80.0);
+				minTurn.setValue(12.0);
+				maxTurn.setValue(25.0);
 			}
 			case 2 -> { // Grim / Simulation
 				fov.setValue(120.0);
 				cooldownThreshold.setValue(0.95);
 				aimPoint.setMode("Closest");
-				minTurn.setValue(30.0);
-				maxTurn.setValue(70.0);
+				minTurn.setValue(12.0);
+				maxTurn.setValue(25.0);
 				packetOrder.setValue(true);
 				sprintReset.setMode("Packet");
 			}
@@ -680,8 +625,8 @@ public final class KillAura extends Module {
 				cooldownThreshold.setValue(0.93);
 				humanVariance.setValue(true);
 				rotationJitter.setValue(true);
-				minTurn.setValue(30.0);
-				maxTurn.setValue(60.0);
+				minTurn.setValue(16.0);
+				maxTurn.setValue(32.0);
 			}
 			case 4 -> { // Vulcan / Matrix
 				range.setValue(3.05);
@@ -690,8 +635,8 @@ public final class KillAura extends Module {
 				cooldownThreshold.setValue(0.95);
 				humanVariance.setValue(true);
 				aimPoint.setMode("Adaptive");
-				minTurn.setValue(20.0);
-				maxTurn.setValue(55.0);
+				minTurn.setValue(12.0);
+				maxTurn.setValue(25.0);
 				packetOrder.setValue(true);
 			}
 			case 5 -> { // Blatant / HvH
