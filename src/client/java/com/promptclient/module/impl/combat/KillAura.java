@@ -250,6 +250,25 @@ public final class KillAura extends Module {
 
 	public int debugAttacks() { return debugAttacks; }
 
+	public String debugReject(net.minecraft.entity.LivingEntity entity) {
+		ClientPlayerEntity player = client().player;
+
+		if (player == null) return "no player";
+		if (!entity.isAlive()) return "dead";
+		if (entity.isRemoved()) return "removed";
+		boolean hostile = entity instanceof Monster || entity.getType().getSpawnGroup() == SpawnGroup.MONSTER;
+		if (!(entity instanceof PlayerEntity) && !(entity instanceof MobEntity)) return "type";
+		if (entity instanceof PlayerEntity && !players.getValue()) return "players-off";
+		if (!(entity instanceof PlayerEntity) && hostile && !hostiles.getValue()) return "hostiles-off";
+		if (!(entity instanceof PlayerEntity) && !hostile && !passives.getValue()) return "passives-off";
+		if (entity.isInvisible() && !invisibles.getValue()) return "invisible";
+		double reach = range.getValue();
+		if (distanceSqToHitbox(player, entity) > reach * reach) return "range";
+		if (fov.getValue() < 360.0 && Math.abs(MathHelper.wrapDegrees(angleTo(entity))) > fov.getValue() * 0.5) return "fov";
+		if (antiBot.getValue() && isBot(entity)) return "bot";
+		return "ok";
+	}
+
 	public float debugCd() { return debugCd; }
 
 	public float debugThreshold() { return debugThreshold; }

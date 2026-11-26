@@ -23,6 +23,18 @@ public abstract class ClientPlayerEntityMixin implements ClientPlayerEntityAcces
 	@Override
 	public abstract void promptclient$setLastSprinting(boolean sprinting);
 
+	@Accessor("lastX")
+	@Override
+	public abstract double promptclient$getLastX();
+
+	@Accessor("lastBaseY")
+	@Override
+	public abstract double promptclient$getLastBaseY();
+
+	@Accessor("lastZ")
+	@Override
+	public abstract double promptclient$getLastZ();
+
 	@Inject(method = "sendMovementPackets", at = @At("HEAD"))
 	private void promptclient$beforeMovementPackets(CallbackInfo ci) {
 		RotationManager rotation = RotationManager.get();

@@ -5,4 +5,10 @@ public interface ClientPlayerEntityAccess {
 	boolean promptclient$getLastSprinting();
 
 	void promptclient$setLastSprinting(boolean sprinting);
+
+	double promptclient$getLastX();
+
+	double promptclient$getLastBaseY();
+
+	double promptclient$getLastZ();
 }

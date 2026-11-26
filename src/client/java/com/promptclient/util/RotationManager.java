@@ -44,6 +44,8 @@ public final class RotationManager {
 
 	private float serverYaw;
 	private float serverPitch;
+	private float sentYaw;
+	private float sentPitch;
 	private float goalYaw;
 	private float goalPitch;
 
@@ -78,6 +80,8 @@ public final class RotationManager {
 			if (client.player != null) {
 				this.serverYaw = client.player.getYaw();
 				this.serverPitch = client.player.getPitch();
+				this.sentYaw = this.serverYaw;
+				this.sentPitch = this.serverPitch;
 			}
 		}
 
@@ -108,6 +112,15 @@ public final class RotationManager {
 
 	public float getServerPitch() {
 		return serverPitch;
+	}
+
+	/** Rotation the server actually holds; use this for attack raycasts, never the next tick's goal. */
+	public float getSentYaw() {
+		return sentYaw;
+	}
+
+	public float getSentPitch() {
+		return sentPitch;
 	}
 
 	public void setPreMovementTask(Runnable task) {
@@ -198,6 +211,8 @@ public final class RotationManager {
 		if (!active) {
 			serverYaw = player.getYaw();
 			serverPitch = player.getPitch();
+			sentYaw = serverYaw;
+			sentPitch = serverPitch;
 			hasGoal = false;
 			pushed = false;
 			restoreRenderRotation(player);
@@ -284,6 +299,12 @@ public final class RotationManager {
 		silent = false;
 		lockView = false;
 		pushed = false;
+		MinecraftClient client = MinecraftClient.getInstance();
+
+		if (client.player != null) {
+			sentYaw = client.player.getYaw();
+			sentPitch = client.player.getPitch();
+		}
 		yawRemainder = 0.0f;
 		pitchRemainder = 0.0f;
 		speedRamp = 0.0f;
@@ -309,6 +330,9 @@ public final class RotationManager {
 			return;
 		}
 
+		// The movement packet was just built; this is now the rotation the server holds.
+		sentYaw = serverYaw;
+		sentPitch = serverPitch;
 		player.setYaw(savedYaw);
 		player.setPitch(savedPitch);
 		pushed = false;
@@ -349,8 +373,12 @@ public final class RotationManager {
 	 * {@code ignoreWalls} is set.
 	 */
 	public boolean canSee(ClientPlayerEntity player, Entity target, double reach, double wallRange, boolean ignoreWalls) {
-		Vec3d eye = player.getEyePos();
-		Vec3d direction = Vec3d.fromPolar(serverPitch, serverYaw);
+		// Attack validation uses the server-side player position: the last position this client sent.
+		double eyeOffset = player.getEyeY() - player.getY();
+		ClientPlayerEntityAccess access = (ClientPlayerEntityAccess) player;
+		Vec3d eye = new Vec3d(access.promptclient$getLastX(), access.promptclient$getLastBaseY() + eyeOffset,
+				access.promptclient$getLastZ());
+		Vec3d direction = Vec3d.fromPolar(sentPitch, sentYaw);
 		Vec3d end = eye.add(direction.multiply(reach));
 		Optional<Vec3d> hit = target.getBoundingBox().raycast(eye, end);
 

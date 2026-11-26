@@ -41,8 +41,9 @@ public final class DevHarness {
 					GLFW.glfwSetWindowSize(client.getWindow().getHandle(), 1600, 900);
 					client.onResolutionChanged();
 					PromptClient.LOGGER.info("AUTOTEST connecting");
-					ConnectScreen.connect(new TitleScreen(), client, ServerAddress.parse("anticheat-test.com"),
-							new ServerInfo("act", "anticheat-test.com", ServerInfo.ServerType.OTHER), false, null);
+					String host = System.getenv().getOrDefault("PROMPTCLIENT_TEST_HOST", "anticheat-test.com");
+					ConnectScreen.connect(new TitleScreen(), client, ServerAddress.parse(host),
+							new ServerInfo("autotest", host, ServerInfo.ServerType.OTHER), false, null);
 					step = 1;
 				}
 			}
@@ -77,7 +78,7 @@ public final class DevHarness {
 				}
 			}
 			case 2 -> {
-				if (ticks < 300) {
+				if (ticks < 1) {
 					client.options.forwardKey.setPressed(true);
 					client.options.leftKey.setPressed(true);
 					client.options.jumpKey.setPressed(ticks % 12 == 0);
@@ -86,7 +87,7 @@ public final class DevHarness {
 						client.player.setYaw(client.player.getYaw() + 3.0f);
 					}
 				} else {
-					if (ticks == 300) {
+					if (ticks == 1) {
 						for (Setting setting : PromptClient.getModuleManager().get(KillAura.class).getSettings()) {
 							if (setting instanceof com.promptclient.setting.NumberSetting number && number.getName().equals("FOV")) {
 								number.setValue(360.0);
@@ -94,16 +95,20 @@ public final class DevHarness {
 						}
 					}
 
-					var nearest = client.world.getEntitiesByClass(net.minecraft.entity.player.PlayerEntity.class,
-							client.player.getBoundingBox().expand(16.0), other -> other != client.player).stream()
+					var nearest = client.world.getEntitiesByClass(net.minecraft.entity.LivingEntity.class,
+							client.player.getBoundingBox().expand(16.0), other -> other != client.player && (other instanceof net.minecraft.entity.mob.MobEntity || other instanceof net.minecraft.entity.player.PlayerEntity)).stream()
 							.min(java.util.Comparator.comparingDouble(client.player::distanceTo)).orElse(null);
 
 					if (nearest != null) {
+						PromptClient.LOGGER.info("AUTOTEST seek {} d={} reject={}", nearest.getType().getName().getString(),
+								client.player.distanceTo(nearest),
+								PromptClient.getModuleManager().get(KillAura.class).debugReject(nearest));
 						double dx = nearest.getX() - client.player.getX();
 						double dz = nearest.getZ() - client.player.getZ();
 						float targetYaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+						targetYaw += (float) (Math.sin(ticks * 0.25) * 6.0);
 						client.player.setYaw(targetYaw);
-						client.options.forwardKey.setPressed(client.player.distanceTo(nearest) > 2.2);
+						client.options.forwardKey.setPressed(client.player.distanceTo(nearest) > 2.0);
 						client.options.leftKey.setPressed(false);
 						client.options.jumpKey.setPressed(ticks % 12 == 0);
 					}
@@ -147,7 +152,7 @@ public final class DevHarness {
 					ScreenshotRecorder.saveScreenshot(client.runDirectory, "act-" + ticks + ".png", client.getFramebuffer(), message -> { });
 				}
 
-				if (ticks == 800) {
+				if (ticks == 2400) {
 					ScreenshotRecorder.saveScreenshot(client.runDirectory, "act-final.png", client.getFramebuffer(), message -> { });
 					client.scheduleStop();
 					step = 3;
