@@ -1,7 +1,10 @@
 package com.promptclient;
 
 import com.promptclient.module.ModuleManager;
+import com.promptclient.module.impl.misc.ClickGui;
+import com.promptclient.module.impl.render.Chat;
 import com.promptclient.module.impl.render.Fullbright;
+import com.promptclient.module.impl.render.Hud;
 import com.promptclient.ui.HudRenderer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -27,10 +30,15 @@ public final class PromptClient implements ClientModInitializer {
 		LOGGER.info("{} initialized with {} module(s)", NAME, MODULE_MANAGER.getModules().size());
 	}
 
-	/** Every module is registered here, one line each. */
+	/** Every module is registered here, one line each. Chain {@code .setEnabled(true)} for on-by-default modules. */
 	private static void registerModules() {
 		// Render
 		MODULE_MANAGER.register(new Fullbright());
+		MODULE_MANAGER.register(new Hud()).setEnabled(true);
+		MODULE_MANAGER.register(new Chat()).setEnabled(true);
+
+		// Misc
+		MODULE_MANAGER.register(new ClickGui());
 	}
 
 	public static ModuleManager getModuleManager() {

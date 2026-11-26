@@ -4,6 +4,7 @@
 	"package": "com.promptclient.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
+		"ChatHudMixin",
 		"LightmapTextureManagerMixin"
 	],
 	"injectors": {

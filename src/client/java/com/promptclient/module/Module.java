@@ -1,19 +1,26 @@
 package com.promptclient.module;
 
+import com.promptclient.setting.Setting;
 import net.minecraft.client.MinecraftClient;
 import org.lwjgl.glfw.GLFW;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Base class for every PromptClient feature.
  *
  * <p>Subclasses pass their metadata to the constructor and override only the hooks they need:
- * {@link #onEnable()}, {@link #onDisable()} and {@link #onTick()}. Register new modules in
- * {@code PromptClient#registerModules()}.
+ * {@link #onEnable()}, {@link #onDisable()} and {@link #onTick()}. Settings are declared as fields
+ * with {@link #addSetting(Setting)}. Register new modules in {@code PromptClient#registerModules()}.
  */
 public abstract class Module {
 	private final String name;
 	private final String description;
 	private final Category category;
+	private final List<Setting> settings = new ArrayList<>();
+	private final List<Setting> settingsView = Collections.unmodifiableList(settings);
 	private int keyCode;
 	private boolean enabled;
 
@@ -62,6 +69,26 @@ public abstract class Module {
 
 	/** Called at the end of every client tick while the module is enabled. */
 	protected void onTick() {
+	}
+
+	/**
+	 * Registers a setting so it shows in the ClickGUI, in declaration order. Use it in field initializers:
+	 * {@code private final BooleanSetting x = addSetting(new BooleanSetting(...));}
+	 */
+	protected final <S extends Setting> S addSetting(S setting) {
+		setting.attach(this);
+		settings.add(setting);
+		return setting;
+	}
+
+	/** Read-only view of this module's settings. Allocation-free, so it is safe to call every frame. */
+	public final List<Setting> getSettings() {
+		return settingsView;
+	}
+
+	/** Whether the HUD module list shows this module while it is enabled. Override for always-on cosmetics. */
+	public boolean isVisibleInArrayList() {
+		return true;
 	}
 
 	/** Shorthand for {@link MinecraftClient#getInstance()}. */

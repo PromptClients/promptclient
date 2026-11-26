@@ -4,23 +4,27 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Central registry for all modules. Also polls module keybinds once per client tick.
  */
 public final class ModuleManager {
 	private final Map<Class<? extends Module>, Module> modules = new LinkedHashMap<>();
+	private final List<Module> orderedModules = new ArrayList<>();
+	private final List<Module> modulesView = Collections.unmodifiableList(orderedModules);
 
-	// Keys held during the previous tick, so a key toggles once per press rather than every tick.
-	private Set<Integer> heldKeys = new HashSet<>();
-	private Set<Integer> pressedKeys = new HashSet<>();
+	// Key state indexed by GLFW key code. heldKeys is the previous tick, so a key toggles once per press
+	// rather than every tick. Plain arrays avoid boxing key codes (most are > 127) on every tick.
+	private boolean[] heldKeys = new boolean[GLFW.GLFW_KEY_LAST + 1];
+	private boolean[] pressedKeys = new boolean[GLFW.GLFW_KEY_LAST + 1];
 
 	/** Registers a module. Each module class may only be registered once. */
 	public <T extends Module> T register(T module) {
@@ -28,6 +32,7 @@ public final class ModuleManager {
 			throw new IllegalStateException("Module already registered: " + module.getClass().getName());
 		}
 
+		orderedModules.add(module);
 		return module;
 	}
 
@@ -58,18 +63,19 @@ public final class ModuleManager {
 		return module != null && module.isEnabled();
 	}
 
-	/** All modules, in registration order. */
+	/** All modules in registration order, as a read-only view. Allocation-free, so it is safe per frame. */
 	public List<Module> getModules() {
-		return List.copyOf(modules.values());
+		return modulesView;
 	}
 
+	/** Allocates a new list; call it once at setup, not every frame. */
 	public List<Module> getModulesByCategory(Category category) {
 		return modules.values().stream()
 				.filter(module -> module.getCategory() == category)
 				.toList();
 	}
 
-	/** Enabled modules, sorted alphabetically by name. */
+	/** Enabled modules, sorted alphabetically by name. Allocates a new list; don't call it every frame. */
 	public List<Module> getEnabledModules() {
 		return modules.values().stream()
 				.filter(Module::isEnabled)
@@ -80,13 +86,15 @@ public final class ModuleManager {
 	/** Wired to {@code ClientTickEvents.END_CLIENT_TICK} in {@code PromptClient}. */
 	public void onTick(MinecraftClient client) {
 		if (client.player == null || client.world == null) {
-			heldKeys.clear();
+			Arrays.fill(heldKeys, false);
 			return;
 		}
 
 		handleKeybinds(client);
 
-		for (Module module : modules.values()) {
+		for (int i = 0; i < orderedModules.size(); i++) {
+			Module module = orderedModules.get(i);
+
 			if (module.isEnabled()) {
 				module.onTick();
 			}
@@ -96,28 +104,28 @@ public final class ModuleManager {
 	private void handleKeybinds(MinecraftClient client) {
 		long window = client.getWindow().getHandle();
 
-		pressedKeys.clear();
-		for (Module module : modules.values()) {
-			int key = module.getKeyCode();
+		Arrays.fill(pressedKeys, false);
+		for (int i = 0; i < orderedModules.size(); i++) {
+			int key = orderedModules.get(i).getKeyCode();
 
 			if (isValidKey(key) && InputUtil.isKeyPressed(window, key)) {
-				pressedKeys.add(key);
+				pressedKeys[key] = true;
 			}
 		}
 
 		// Key state is always tracked, but toggles only fire with no screen open, so typing in
 		// chat or a sign doesn't toggle modules, and a key still held when a screen closes doesn't either.
-		if (client.currentScreen == null) {
-			for (Module module : modules.values()) {
-				int key = module.getKeyCode();
+		for (int i = 0; i < orderedModules.size() && client.currentScreen == null; i++) {
+			Module module = orderedModules.get(i);
+			int key = module.getKeyCode();
 
-				if (pressedKeys.contains(key) && !heldKeys.contains(key)) {
-					module.toggle();
-				}
+			// Re-checking currentScreen each iteration stops once a toggle opens a screen (e.g. the ClickGUI).
+			if (isValidKey(key) && pressedKeys[key] && !heldKeys[key]) {
+				module.toggle();
 			}
 		}
 
-		Set<Integer> previous = heldKeys;
+		boolean[] previous = heldKeys;
 		heldKeys = pressedKeys;
 		pressedKeys = previous;
 	}

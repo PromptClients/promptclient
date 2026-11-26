@@ -2,17 +2,29 @@
 
 A lightweight, modular client-side mod for **Minecraft 1.21.1**, built on Fabric.
 
-PromptClient gives you a small, clean base for client features: a module system with categories, keybinds and lifecycle hooks, a minimal HUD, and Mixin-based hooks into the game.
+PromptClient is a clean base for client features: a module system with settings and keybinds, an animated ClickGUI in the style of macOS dark mode, a glass HUD, and restyled chat. All of it is drawn with batched 2D rendering that doesn't allocate per frame.
 
 ## Features
 
-| Module     | Category | Default key | What it does                                                 |
-|------------|----------|-------------|--------------------------------------------------------------|
-| Fullbright | Render   | `G`         | Renders caves and dark areas at full brightness. Press again to restore normal lighting. |
+| Module     | Category | Default key   | What it does |
+|------------|----------|---------------|--------------|
+| ClickGUI   | Misc     | `Right Shift` | Opens the settings menu. **Accent** sets the highlight color everywhere. |
+| Fullbright | Render   | `G`           | Lights up caves and dark areas. **Mode**: Lightmap (flat, maximum), Gamma (adjustable, keeps some shading), or NightVision. |
+| HUD        | Render   | on by default | Glass watermark badge with version and FPS, plus a list of enabled modules (top right, or under the badge). |
+| Chat       | Render   | on by default | Replaces the flat chat background with a rounded translucent card. New messages slide and fade in. Turn it off for vanilla chat. |
 
-**HUD:** a `PromptClient` watermark sits in the top-left corner with the currently enabled modules listed under it. It hides when the HUD is hidden (`F1`) or the debug screen is open (`F3`).
+Module keybinds only fire while you're in a world with no screen open, so typing in chat won't toggle modules.
 
-Keybinds only fire while you're in a world with no screen open, so typing in chat won't toggle modules.
+## Using the ClickGUI
+
+Press **Right Shift** to open it. The game keeps running while it's open.
+
+- **Left-click** a module to toggle it. **Right-click** it to expand its settings.
+- **Drag** a panel by its header. It snaps to a grid and lines up with nearby panels.
+- **Scroll** a panel's list with the mouse wheel.
+- **Type** anywhere to filter modules. **Esc** clears the search, then closes the GUI.
+- **Bind** row: click it, then press a key. **Esc** or **Delete** unbinds, and right-click also clears the binding.
+- Mode settings: left-click for the next mode, right-click for the previous one.
 
 ## Requirements
 
@@ -42,26 +54,29 @@ Gradle runs on Java 21. `gradle/gradle-daemon-jvm.properties` asks for it, so Gr
 
 ```
 src/
-├── main/resources/fabric.mod.json          # mod metadata (no Java code lives in src/main)
+├── main/resources/fabric.mod.json            # mod metadata (no Java code lives in src/main)
 └── client/
     ├── java/com/promptclient/
-    │   ├── PromptClient.java               # entrypoint: registers modules, tick + HUD callbacks
-    │   ├── module/
-    │   │   ├── Module.java                 # base class: name, description, category, key, lifecycle
-    │   │   ├── Category.java               # RENDER, MOVEMENT, COMBAT, PLAYER, MISC
-    │   │   ├── ModuleManager.java          # registry, lookups, keybind polling
-    │   │   └── impl/render/Fullbright.java
-    │   ├── mixin/LightmapTextureManagerMixin.java
-    │   └── ui/HudRenderer.java             # watermark + enabled-module list
+    │   ├── PromptClient.java                 # entrypoint: registers modules, tick + HUD callbacks
+    │   ├── module/                           # Module, Category, ModuleManager, impl/<category>/...
+    │   ├── setting/                          # BooleanSetting, NumberSetting, ModeSetting
+    │   ├── mixin/                            # ChatHudMixin, LightmapTextureManagerMixin
+    │   └── ui/
+    │       ├── clickgui/                     # ClickGuiScreen, panels, module rows, setting widgets
+    │       ├── render/                       # RenderUtils (batched 2D primitives), Colors
+    │       ├── anim/                         # frame clock and easing
+    │       ├── HudRenderer.java, ChatRenderer.java, Theme.java
     └── resources/promptclient.mixins.json
 ```
 
 ## Adding a module
 
-1. Create a class in `module/impl/<category>/`:
+1. Create a class in `module/impl/<category>/`. Declare settings as fields; they appear in the ClickGUI automatically:
 
    ```java
    public final class Sprint extends Module {
+       private final BooleanSetting omni = addSetting(new BooleanSetting("Omni", "Sprint in every direction.", false));
+
        public Sprint() {
            super("Sprint", "Always sprint.", Category.MOVEMENT, GLFW.GLFW_KEY_UNKNOWN);
        }
@@ -83,4 +98,4 @@ src/
 
 ## Developing with Claude Code
 
-[`CLAUDE.md`](CLAUDE.md) documents the build commands, conventions and definition of done that Claude Code follows when working on this repository.
+[`CLAUDE.md`](CLAUDE.md) documents the build commands, conventions, rendering rules and definition of done that Claude Code follows when working on this repository.

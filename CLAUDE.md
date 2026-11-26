@@ -39,12 +39,23 @@ Run these from the repo root with the **Bash tool**; `./gradlew` is the POSIX wr
 src/main/resources/fabric.mod.json      metadata only. NO Java in src/main.
 src/client/java/com/promptclient/
   PromptClient.java                     ClientModInitializer: registerModules(), tick + HUD callbacks
-  module/Module.java                    abstract base (name, description, category, keyCode, enabled)
+  module/Module.java                    abstract base: name, description, category, keyCode, enabled, settings
   module/Category.java                  RENDER, MOVEMENT, COMBAT, PLAYER, MISC
   module/ModuleManager.java             registry, lookups, keybind polling, per-tick dispatch
-  module/impl/<category>/<Name>.java    one class per module
-  mixin/<Target>Mixin.java              Mixins (client side)
-  ui/HudRenderer.java                   HudRenderCallback: watermark (6,6) + enabled-module list
+  module/impl/<category>/<Name>.java    one class per module (render/: Fullbright, Hud, Chat; misc/: ClickGui)
+  setting/                              Setting (base), BooleanSetting, NumberSetting, ModeSetting
+  mixin/<Target>Mixin.java              Mixins (client side): ChatHudMixin, LightmapTextureManagerMixin
+  ui/Theme.java                         palette + Theme.accent() (from the ClickGUI module's Accent setting)
+  ui/HudRenderer.java                   HudRenderCallback: glass watermark badge (8,8) + animated module list
+  ui/ChatRenderer.java                  chat card drawing + new-message slide/fade (called by ChatHudMixin)
+  ui/render/RenderUtils.java            batched 2D primitives: rounded rects, rings, shadows, lines, text, scissor
+  ui/render/Colors.java                 packed-ARGB helpers (lerp, alpha) instead of java.awt.Color
+  ui/anim/Anim.java, FrameClock.java    exponential approach + easing; real frame delta (capped at 0.05 s)
+  ui/clickgui/ClickGuiScreen.java       the Screen: open/close animation, input, z-order, hint footer
+  ui/clickgui/CategoryPanel.java        draggable card per Category with clipped, scrolling module list
+  ui/clickgui/ModuleEntry.java          module row + settings accordion
+  ui/clickgui/*Component.java           one widget per Setting type, plus KeybindComponent
+  ui/clickgui/SearchBar.java, GuiFrame.java
 src/client/resources/promptclient.mixins.json
 ```
 
@@ -59,19 +70,78 @@ src/client/resources/promptclient.mixins.json
      - `onDisable()`: it must undo every side effect of `onEnable()` or `onTick()`.
      - `onTick()`: runs on `END_CLIENT_TICK` while the module is enabled.
    - Use `client()` to get the `MinecraftClient`. Null-check `client().player` and `client().world`.
-   - Register it with one line in `PromptClient#registerModules()`, under the comment for its category. This is the only registration point.
-3. **Keybinds** are raw GLFW key codes, polled by `ModuleManager.handleKeybinds()` and edge-triggered. They only fire in a world with no screen open. Don't register vanilla `KeyBinding`s for toggling modules.
-4. **Categories:** use an existing `Category`. Add a new enum constant only when no existing one fits, and give it a matching `impl/` subpackage.
-5. **Mixins:**
+   - Register it with one line in `PromptClient#registerModules()`, under the comment for its category. This is the only registration point. For an on-by-default module, chain `.setEnabled(true)` on that line.
+   - Override `isVisibleInArrayList()` to return `false` for always-on cosmetic modules (HUD, Chat and ClickGUI do this).
+   - The ClickGUI picks up every registered module and its settings automatically. There is no GUI code to write for a new module.
+3. **Settings** (`setting/`): declare them as fields with `addSetting(...)`, in the order they should appear:
+   ```java
+   private final ModeSetting mode = addSetting(new ModeSetting("Mode", "How it works.", "Fast", "Fast", "Smooth"));
+   private final NumberSetting speed = addSetting(new NumberSetting("Speed", "Blocks per tick.", 1.0, 0.1, 5.0, 0.1)
+           .visibleWhen(() -> mode.getIndex() == 1));
+   ```
+   - `visibleWhen` runs every frame, so keep it trivial. Compare `getIndex()` rather than strings on hot paths.
+   - Keep descriptions short (one line): they appear in the hint footer.
+   - **Width budget:** a settings row is ~104 px wide, shared by the label and its control (mode pill, key pill, value). Keep the label plus the longest mode name under ~90 px (roughly 15 characters in total), or the control overflows.
+   - A new Setting type needs a matching `*Component` in `ui/clickgui/` and a case in `Component.of(...)`.
+4. **Keybinds** are raw GLFW key codes, polled by `ModuleManager.handleKeybinds()` and edge-triggered. They only fire in a world with no screen open. Don't register vanilla `KeyBinding`s for toggling modules. Users rebind them in the ClickGUI ("Bind" row: Esc or Delete unbinds).
+5. **Categories:** use an existing `Category`. Add a new enum constant only when no existing one fits, and give it a matching `impl/` subpackage. The ClickGUI shows one panel per constant.
+6. **Mixins:**
    - Put them in `com.promptclient.mixin`, named `<TargetClass>Mixin`, as abstract classes.
    - **Add the simple class name to the `"client"` array in `src/client/resources/promptclient.mixins.json`.** A Mixin that isn't listed there silently does nothing.
    - Prefix handler methods with `promptclient$`.
-   - Prefer `@Inject`, `@ModifyArg`, `@ModifyVariable`, or MixinExtras `@WrapOperation` / `@ModifyExpressionValue` (bundled with Fabric Loader). Avoid `@Redirect` and `@Overwrite`, because they conflict with other mods.
-   - Keep Mixins thin. Read state through `PromptClient.getModuleManager().isEnabled(X.class)` or `.get(X.class)`, and keep the logic in the module. `ModuleManager` is created eagerly, so this is null-safe at any time.
+   - Prefer `@Inject`, `@ModifyArg`, `@ModifyVariable`, or MixinExtras `@ModifyExpressionValue` / `@WrapWithCondition` / `@WrapOperation` (MixinExtras 0.5.5 is bundled with Fabric Loader). Avoid `@Redirect` and `@Overwrite`, because they conflict with other mods.
+   - On per-frame paths, prefer `@WrapWithCondition` (skip a void call) or `@ModifyArg` over `@WrapOperation`, which creates an `Operation` object per call. Use `@Local Type name` to capture a local by type when that type is unique in the method (`ChatHudMixin` does this for `ChatHudLine.Visible`).
+   - When targeting by `ordinal`, record in the Mixin's Javadoc what each ordinal is, as verified with `javap -c`. A wrong ordinal doesn't crash; it silently hooks the wrong call.
+   - Keep Mixins thin. Read state through `PromptClient.getModuleManager().isEnabled(X.class)` or `.get(X.class)`, and put the logic in the module or a `ui/` class. `isEnabled` is null-safe at any time; `get` is safe once `onInitializeClient` has run (always true for render and tick code). Mark helper methods and fields `@Unique`.
    - `injectors.defaultRequire = 1`, so a target that doesn't match **crashes at startup**. That is deliberate: fail fast.
    - **There is no refmap, and that is expected.** Loom 1.17 remaps Mixin annotation strings directly inside `remapJar`. Don't add a `"refmap"` key.
-6. **Rendering:** use `DrawContext` inside `HudRenderCallback`. In 1.21.1 the callback gets a `RenderTickCounter`, not a `float`. Add HUD elements in `ui/`.
-7. Use `PromptClient.LOGGER` for logging. Don't use `System.out`.
+7. **Rendering:** see "Rendering and performance rules" below. In 1.21.1 `HudRenderCallback` gets a `RenderTickCounter`, not a `float`. HUD and GUI code goes in `ui/`.
+8. Use `PromptClient.LOGGER` for logging. Don't use `System.out`.
+
+## Rendering and performance rules
+
+All UI (ClickGUI, HUD, chat) follows these rules. Check new UI code against them before finishing.
+
+**Zero allocation per frame in our code.** Inside `render(...)`, `onHudRender(...)` and Mixin handlers on per-frame paths:
+- No `new ArrayList`, streams, `String.format`, string concatenation, `new Color`, or lambdas or method references.
+- Build lists once, in constructors or a lazy `initialize()`. Iterate with indexed loops or over arrays. `Module#getSettings()` and `ModuleManager#getModules()` return cached views and are fine; `getModulesByCategory` and `getEnabledModules` allocate, so call them at setup only.
+- Cache strings and widths. `TextRenderer#getWidth` allocates internally, so measure once, or only when the string changes (compare by identity: `NumberSetting#getDisplayValue()` and `ModeSetting#getMode()` return the same instance until the value changes). Rebuild things like the FPS text at most every 250 ms.
+- Colors are packed `0xAARRGGBB` ints. Use `ui/render/Colors` for alpha and lerp.
+- Unavoidable, and accepted: vanilla creates one `BufferBuilder`/`BuiltBuffer` per batch, and one text `Drawer` per string drawn.
+
+**Batch with `RenderUtils`.** In 1.21.1 every `DrawContext#fill` and `drawText` is its own draw call (`tryDraw()` flushes each one). Instead, for each layer:
+```java
+RenderUtils.begin(context);          // opens one TRIANGLES / POSITION_COLOR buffer
+RenderUtils.shadow(...); RenderUtils.roundedGradientV(...); RenderUtils.roundedOutline(...); RenderUtils.circle(...);
+RenderUtils.end();                   // flushes anything DrawContext queued, then draws all shapes in 1 call
+RenderUtils.text(context, textRenderer, "Hi", x, y, color, false);   // queued, not drawn yet
+RenderUtils.flush(context);          // all queued text in ~1 call
+```
+- Draw order is the order of `end()`/`flush()` calls. Queue text only *after* `end()`: `text()` throws inside a batch, because the text would otherwise be flushed underneath the shapes.
+- `RenderUtils.setAlpha(f)` multiplies everything drawn afterwards (fades). Save it with `getAlpha()` and restore it afterwards.
+- Clipping: use `RenderUtils.enableScissor(context, x, y, w, h)` / `disableScissor(context)`. They take the current matrix into account (so the ClickGUI's scale animation clips correctly) and flush queued text first.
+- Text with alpha < 4 is skipped (vanilla would draw it fully opaque).
+- RenderUtils uses its own `BufferAllocator`. Never call vanilla draw helpers (`drawTexture`, item rendering) between `begin` and `end`.
+
+**Animation.** Use `FrameClock#tick()` for frame time (seconds, capped at 0.05) and `Anim.approach(current, target, speed, dt)` for exponential easing. Never animate with the `delta` that render methods receive: that is the partial tick, not frame time. Store every animated value in a field.
+
+**No blur shaders.** `ClickGuiScreen#renderBackground` is overridden to a no-op, because vanilla's runs a multi-pass blur. The "frosted glass" look is alpha gradients plus 1 px borders (`Theme`).
+
+**ClickGUI structure.** `ClickGuiScreen` → `CategoryPanel` (one per `Category`) → `ModuleEntry` (row + accordion) → `Component` (one per setting, then `KeybindComponent`). Layout is computed during render and reused for hit-testing on the next input event. Mouse input is mapped through the inverse of the open/close scale (`toContentX/Y`).
+
+## Visual verification (UI changes)
+
+`./gradlew build` only proves the code compiles. For UI work, take screenshots with a **temporary, uncommitted** harness:
+1. Create `src/client/java/com/promptclient/DevHarness.java` with a step machine on `ClientTickEvents.END_CLIENT_TICK`. Hook it in `PromptClient#onInitializeClient` with a line ending in `// TEMP-HARNESS`, guarded by `System.getenv("PROMPTCLIENT_DEV_HARNESS") != null`.
+2. Have the step machine:
+   - Set `options.pauseOnLostFocus = false`, resize the window with `GLFW.glfwSetWindowSize(handle, 1600, 900)`, set GUI scale 2 and call `onResolutionChanged()`. That gives 800x450 scaled.
+   - Create a world: `CreateWorldScreen.create(client, new TitleScreen())`. Once that screen is open, configure `getWorldCreator()` (name, `Mode.CREATIVE`, cheats, the `WorldPresets.FLAT` type), then call the private `createLevel()` by reflection (dev runtime uses Yarn names).
+   - Once in a world, drive the UI directly: module `setEnabled`, `ModeSetting#setMode`, `currentScreen.mouseClicked/charTyped/keyPressed`, chat `addMessage`, `sendChatCommand("time set midnight")`.
+   - Save screenshots with `ScreenshotRecorder.saveScreenshot(client.runDirectory, "name.png", client.getFramebuffer(), msg -> {})` into `run/screenshots/`, then call `client.scheduleStop()`.
+3. Run `PROMPTCLIENT_DEV_HARNESS=1 ./gradlew runClient`, then view the PNGs with the Read tool. To compare brightness, sample pixels rather than eyeballing them; the ClickGUI dims the screen on purpose.
+4. **Delete the harness and the `TEMP-HARNESS` line before committing.** `grep -rn "DevHarness\|TEMP-HARNESS" src/` must print nothing.
+
+At 800x450, the five 124 px panels start at x = 70 (RENDER), 204, 338, 472, 606 (MISC), at y = 44. A panel's first module row is centered at y ≈ 81.
 
 ## Finding Yarn names (1.21.1)
 
@@ -86,7 +156,13 @@ JAR=$(find .gradle/loom-cache/minecraftMaven -name 'minecraft-clientOnly-*.jar' 
 
 For readable source, run `./gradlew genSources` and read the `*-sources.jar` next to that jar with `unzip -p`. Mixin `@At(target = ...)` strings use Yarn names in JVM descriptor form, for example `Lnet/minecraft/client/texture/NativeImage;setColor(III)V`.
 
-Yarn reminders: `MinecraftClient`, `ClientPlayerEntity`, `ClientWorld`, `DrawContext`, `TextRenderer`, `Text`, `InputUtil`, `GameOptions`, `SimpleOption`. In 1.21.1 the lightmap is computed on the CPU in `LightmapTextureManager#update(float)` and rebuilt every tick. Fullbright depends on that, so re-verify it before porting to another Minecraft version.
+Yarn reminders: `MinecraftClient`, `ClientPlayerEntity`, `ClientWorld`, `DrawContext`, `TextRenderer`, `Text`, `InputUtil`, `GameOptions`, `SimpleOption`.
+
+Version-specific behavior the code relies on. Re-verify all of it before porting to another Minecraft version:
+- The lightmap is computed on the CPU in `LightmapTextureManager#update(float)` and rebuilt every tick. All three Fullbright modes hook it (see `LightmapTextureManagerMixin`'s Javadoc).
+- `ChatHud#render` draws one `fill` per line, then the text at z+50. `ChatRenderer` mirrors its line-visibility and opacity logic.
+- `Screen#renderBackground` applies the menu blur. The ClickGUI overrides it.
+- The `BufferBuilder(BufferAllocator, DrawMode, VertexFormat)` constructor and `BufferRenderer.drawWithGlobalProgram(BuiltBuffer)` are what `RenderUtils` uses.
 
 ## Runtime smoke test
 
@@ -121,5 +197,6 @@ A feature, module or fix is done only when all of these hold:
 - [ ] Every Yarn name and Mixin target was checked against the mapped jar, not guessed.
 - [ ] `./gradlew build` ends with **BUILD SUCCESSFUL**. Don't finish on a failing or skipped build.
 - [ ] If Mixins, startup or HUD code changed, the runtime smoke test passes.
+- [ ] UI changes follow "Rendering and performance rules" (no per-frame allocation, batched through `RenderUtils`) and were checked visually with the temporary harness. The harness is deleted before commit.
 - [ ] `README.md` is updated: the features table for module changes, and any changed commands.
 - [ ] The change is committed and pushed: `git push origin main` succeeded, and `git status` is clean.
