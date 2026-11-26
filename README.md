@@ -39,7 +39,9 @@ KillAura (`R`) is built for single-player and local anti-cheat testing. The **Pr
 | Vulcan | 3.05 reach, packet-order-safe swings, smooth acceleration/deceleration, gaussian delays. |
 | Blatant | 4.5 reach, 360° FOV, multi-target, instant snap, through walls. |
 
-Presets are ordinary settings, so tweak anything afterwards. **Rotate** Silent spoofs only the server look (the camera stays put); **Lock View** turns the camera; **None** only attacks. **Raycast** strict uses the server-side crosshair, not the visible one. Target ESP draws the ring in world space and is allocation-free.
+Presets are ordinary settings, so tweak anything afterwards. **Rotate** Silent spoofs only the server look (the camera stays put); **Lock View** turns the camera; **None** only attacks. **Raycast** strict re-runs the attack ray with the rotation the server already has, on the exact 3.0 hitbox. Vanilla entity attacks are suppressed while silent rotations are active so the crosshair cannot fight the aura. **Order** pre sends the attack before the movement packet (vanilla/Grim-safe; post attacks with the last sent look). **Multi Limit** keeps multi-aura at one attack per tick by default. Target ESP draws the ring in world space and is allocation-free.
+
+**Debug** shows target, distance, ray result, camera vs server rotation and cooldown on the HUD. Anti-Bot is off by default because test servers (Matrix NPCs, NoAI dummies) are otherwise skipped; the hover check tests the block below too, so NoAI mobs are not treated as bots.
 
 ## Requirements
 

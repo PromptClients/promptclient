@@ -1,8 +1,10 @@
 package com.promptclient.mixin;
 
+import com.promptclient.util.ClientPlayerEntityAccess;
 import com.promptclient.util.RotationManager;
 import net.minecraft.client.network.ClientPlayerEntity;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.gen.Accessor;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -12,7 +14,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * spoofed look values are installed at HEAD, then the visible camera values are restored at RETURN.
  */
 @Mixin(ClientPlayerEntity.class)
-public abstract class ClientPlayerEntityMixin {
+public abstract class ClientPlayerEntityMixin implements ClientPlayerEntityAccess {
+	@Accessor("lastSprinting")
+	@Override
+	public abstract boolean promptclient$getLastSprinting();
+
+	@Accessor("lastSprinting")
+	@Override
+	public abstract void promptclient$setLastSprinting(boolean sprinting);
+
 	@Inject(method = "sendMovementPackets", at = @At("HEAD"))
 	private void promptclient$beforeMovementPackets(CallbackInfo ci) {
 		RotationManager rotation = RotationManager.get();

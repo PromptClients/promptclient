@@ -1,18 +1,22 @@
 package com.promptclient.module.impl.combat;
 
 import com.promptclient.module.Category;
+import com.promptclient.util.ClientPlayerEntityAccess;
 import com.promptclient.module.Module;
 import com.promptclient.setting.BooleanSetting;
 import com.promptclient.setting.ModeSetting;
 import com.promptclient.setting.NumberSetting;
 import com.promptclient.ui.Theme;
 import com.promptclient.util.RotationManager;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.VertexConsumer;
+import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.Entity;
@@ -25,6 +29,7 @@ import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Util;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -101,7 +106,7 @@ public final class KillAura extends Module {
 	private final BooleanSetting ignoreTeams = addSetting(new BooleanSetting("Teams",
 			"Skip teammates and same armor color.", true));
 	private final BooleanSetting antiBot = addSetting(new BooleanSetting("Anti-Bot",
-			"Skip fresh, tab-less or hovering entities.", true));
+			"Skip fresh, tab-less or hovering entities.", false));
 
 	// Timing
 	private final ModeSetting attackMode = addSetting(new ModeSetting("Attack",
@@ -145,20 +150,28 @@ public final class KillAura extends Module {
 	private final BooleanSetting throughWalls = addSetting(new BooleanSetting("Walls",
 			"Ignore block occlusion.", false));
 	private final BooleanSetting packetOrder = addSetting(new BooleanSetting("Order",
-			"Attack before the movement packet is sent.", false));
+			"Attack before the movement packet is sent.", true));
 	private final BooleanSetting rotationJitter = addSetting(new BooleanSetting("Jitter",
 			"Gaussian micro-jitter on the aim point.", false)
 			.visibleWhen(() -> rotationMode.getIndex() == ROT_SILENT));
 	private final ModeSetting swingHand = addSetting(new ModeSetting("Swing",
 			"How the arm swings.", "Main Hand", "Main Hand", "Silent", "None"));
 
+	private final NumberSetting multiLimit = addSetting(new NumberSetting("Multi Limit",
+			"Max attacks per swing beat in Multi mode.", 1.0, 1.0, 5.0, 1.0)
+			.visibleWhen(() -> targetMode.getIndex() == TARGET_MULTI));
+
 	// Visuals
 	private final BooleanSetting targetEsp = addSetting(new BooleanSetting("Target ESP",
 			"Glowing ring around the locked target.", true));
+	private final BooleanSetting debug = addSetting(new BooleanSetting("Debug",
+			"Show targeting and rotation diagnostics.", false));
 
 	private LivingEntity currentTarget;
 	private long switchTimer;
 	private long nextAttackMs;
+	private int multiCursor;
+	private int debugAttacks;
 	private boolean resumeSprint;
 	private boolean resumeSprintPacket;
 
@@ -166,10 +179,12 @@ public final class KillAura extends Module {
 		super("KillAura", "Automatically attacks entities in range.", Category.COMBAT, GLFW.GLFW_KEY_R);
 		preset.onChange(this::applyPreset);
 		WorldRenderEvents.AFTER_ENTITIES.register(this::renderTargetEsp);
+		HudRenderCallback.EVENT.register(this::renderDebugHud);
 	}
 
 	@Override
 	protected void onEnable() {
+		debugAttacks = 0;
 		nextAttackMs = 0L;
 
 		if (preset.getIndex() != 0) {
@@ -214,12 +229,13 @@ public final class KillAura extends Module {
 			rotation.clearGoal();
 		}
 
-		rotation.tick();
 		resumeSprintIfNeeded(player);
 
 		if (!packetOrder.getValue()) {
-			attackNow();
+			attackNow(); // uses the rotation already sent this tick, never the next one
 		}
+
+		rotation.tick();
 	}
 
 	// ---------------------------------------------------------------- targeting
@@ -268,6 +284,12 @@ public final class KillAura extends Module {
 	private void selectTarget() {
 		if (candidates.isEmpty()) {
 			currentTarget = null;
+			return;
+		}
+
+		if (targetMode.getIndex() == TARGET_MULTI) {
+			multiCursor %= candidates.size();
+			currentTarget = candidates.get(multiCursor);
 			return;
 		}
 
@@ -345,10 +367,19 @@ public final class KillAura extends Module {
 			return true;
 		}
 
-		// Hovering vertically with no gravity.
+		// Hovering vertically with no gravity. NoAI mobs never update onGround, so test the block below too.
+		if (entity.isOnGround() || isSupported(entity)) {
+			return false;
+		}
+
 		Vec3d velocity = entity.getVelocity();
-		return !entity.isOnGround() && Math.abs(velocity.y) < 1.0E-4 && entity.age > 40
+		return Math.abs(velocity.y) < 1.0E-4 && entity.age > 40
 				&& !entity.isTouchingWater() && !entity.isSwimming() && !entity.hasVehicle();
+	}
+
+	private boolean isSupported(LivingEntity entity) {
+		BlockPos below = BlockPos.ofFloored(entity.getX(), entity.getY() - 0.1, entity.getZ());
+		return !entity.getWorld().getBlockState(below).getCollisionShape(entity.getWorld(), below).isEmpty();
 	}
 
 	private double distanceSq(LivingEntity entity) {
@@ -403,13 +434,19 @@ public final class KillAura extends Module {
 		boolean multi = targetMode.getIndex() == TARGET_MULTI;
 
 		if (multi) {
-			for (int i = 0; i < candidates.size(); i++) {
-				LivingEntity candidate = candidates.get(i);
+			int limit = (int) multiLimit.getValue();
+			int size = candidates.size();
+			int start = Math.max(0, candidates.indexOf(currentTarget));
+
+			for (int step = 0; step < size && attackTargets.size() < limit; step++) {
+				LivingEntity candidate = candidates.get((start + step) % size);
 
 				if (canAttack(player, candidate)) {
 					attackTargets.add(candidate);
 				}
 			}
+
+			multiCursor = (start + Math.max(1, attackTargets.size())) % size;
 		} else if (canAttack(player, currentTarget)) {
 			attackTargets.add(currentTarget);
 		}
@@ -421,7 +458,8 @@ public final class KillAura extends Module {
 		applySprintReset(player);
 
 		for (int i = 0; i < attackTargets.size(); i++) {
-			client().interactionManager.attackEntity(player, attackTargets.get(i));
+					debugAttacks++;
+					client().interactionManager.attackEntity(player, attackTargets.get(i));
 			swing(player);
 		}
 
@@ -475,6 +513,7 @@ public final class KillAura extends Module {
 		}
 
 		player.setSprinting(false);
+		((ClientPlayerEntityAccess) player).promptclient$setLastSprinting(false);
 		resumeSprint = true;
 		resumeSprintPacket = packet;
 	}
@@ -485,14 +524,18 @@ public final class KillAura extends Module {
 		}
 
 		resumeSprint = false;
-
-		if (resumeSprintPacket && client().getNetworkHandler() != null) {
-			client().getNetworkHandler().sendPacket(
-					new ClientCommandC2SPacket(player, ClientCommandC2SPacket.Mode.START_SPRINTING));
-		}
-
+		boolean packet = resumeSprintPacket;
 		resumeSprintPacket = false;
 		player.setSprinting(true);
+
+		if (packet) {
+			if (client().getNetworkHandler() != null) {
+				client().getNetworkHandler().sendPacket(
+						new ClientCommandC2SPacket(player, ClientCommandC2SPacket.Mode.START_SPRINTING));
+			}
+
+			((ClientPlayerEntityAccess) player).promptclient$setLastSprinting(true);
+		}
 	}
 
 	private void scheduleNextAttack(long now) {
@@ -531,10 +574,10 @@ public final class KillAura extends Module {
 		passives.setValue(false);
 		invisibles.setValue(false);
 		ignoreTeams.setValue(true);
-		antiBot.setValue(true);
+		antiBot.setValue(false);
 		attackMode.setMode("1.9+");
 		cooldownThreshold.setValue(0.95);
-		humanVariance.setValue(false);
+		humanVariance.setValue(true);
 		minAps.setValue(8.0);
 		maxAps.setValue(12.0);
 		sprintReset.setMode("W-Tap");
@@ -547,17 +590,16 @@ public final class KillAura extends Module {
 		moveFix.setValue(true);
 		strictRaycast.setValue(true);
 		throughWalls.setValue(false);
-		packetOrder.setValue(false);
+		packetOrder.setValue(true);
 		rotationJitter.setValue(false);
 		swingHand.setMode("Main Hand");
+		multiLimit.setValue(1.0);
 		targetEsp.setValue(true);
 
 		switch (index) {
 			case 1 -> { // Vanilla / Legit
 				fov.setValue(90.0);
 				cooldownThreshold.setValue(1.0);
-				hostiles.setValue(false);
-				passives.setValue(false);
 				aimPoint.setMode("Center");
 				minTurn.setValue(35.0);
 				maxTurn.setValue(80.0);
@@ -591,7 +633,9 @@ public final class KillAura extends Module {
 				packetOrder.setValue(true);
 			}
 			case 5 -> { // Blatant / HvH
+				humanVariance.setValue(false);
 				targetMode.setMode("Multi");
+				multiLimit.setValue(5.0);
 				range.setValue(4.5);
 				wallRange.setValue(4.5);
 				fov.setValue(360.0);
@@ -603,10 +647,45 @@ public final class KillAura extends Module {
 				maxTurn.setValue(180.0);
 				strictRaycast.setValue(false);
 				throughWalls.setValue(true);
+				packetOrder.setValue(false);
 			}
 			default -> {
 			}
 		}
+	}
+
+	// ---------------------------------------------------------------- debug HUD
+
+	private void renderDebugHud(DrawContext context, RenderTickCounter tickCounter) {
+		ClientPlayerEntity player = client().player;
+
+		if (!isEnabled() || !debug.getValue() || player == null || client().world == null) {
+			return;
+		}
+
+		RotationManager rotation = RotationManager.get();
+		LivingEntity target = currentTarget;
+		double distance = target == null ? -1.0 : Math.sqrt(distanceSqToHitbox(player, target));
+		boolean ray = target != null && rotation.canSee(player, target, range.getValue(), wallRange.getValue(),
+				throughWalls.getValue());
+		int x = 8;
+		int y = 32;
+
+		context.drawTextWithShadow(client().textRenderer, "KillAura debug", x, y, Theme.accent());
+		context.drawTextWithShadow(client().textRenderer,
+				"target: " + (target == null ? "-" : target.getType().getName().getString()), x, y + 11, 0xFFFFFFFF);
+		context.drawTextWithShadow(client().textRenderer,
+				"dist: " + (distance < 0 ? "-" : String.format("%.2f", distance))
+						+ "  ray: " + (ray ? "yes" : "no"), x, y + 22, 0xFFFFFFFF);
+		context.drawTextWithShadow(client().textRenderer,
+				"yaw: " + String.format("%.1f", player.getYaw()) + " -> " + String.format("%.1f", rotation.getServerYaw())
+						+ "  pitch: " + String.format("%.1f", rotation.getServerPitch()), x, y + 33, 0xFFFFFFFF);
+		context.drawTextWithShadow(client().textRenderer,
+				"cd: " + String.format("%.2f", player.getAttackCooldownProgress(0.5f))
+						+ "  hits: " + debugAttacks, x, y + 44, 0xFFFFFFFF);
+		context.drawTextWithShadow(client().textRenderer,
+				"mode: " + rotationMode.getMode() + "  order: " + (packetOrder.getValue() ? "pre" : "post")
+						+ "  bot: " + antiBot.getValue(), x, y + 55, 0xFFFFFFFF);
 	}
 
 	// ---------------------------------------------------------------- target ring

@@ -45,7 +45,7 @@ src/client/java/com/promptclient/
   module/impl/<category>/<Name>.java    one class per module (combat/: KillAura; render/: Fullbright, Hud, Chat; misc/: ClickGui)
   setting/                              Setting (base), BooleanSetting, NumberSetting, ModeSetting
   util/RotationManager.java             server-rotation controller: silent rotations, GCD, MoveFix, server raycasts
-  mixin/<Target>Mixin.java              Mixins (client side): ChatHudMixin, ClientPlayerEntityMixin, KeyboardInputMixin, LightmapTextureManagerMixin
+  mixin/<Target>Mixin.java              Mixins (client side): ChatHudMixin, ClientPlayerEntityMixin, KeyboardInputMixin, LightmapTextureManagerMixin, MinecraftClientMixin
   ui/Theme.java                         palette + Theme.accent() (from the ClickGUI module's Accent setting)
   ui/HudRenderer.java                   HudRenderCallback: glass watermark badge (8,8) + animated module list
   ui/ChatRenderer.java                  chat card drawing + new-message slide/fade (called by ChatHudMixin)
@@ -107,8 +107,23 @@ src/client/resources/promptclient.mixins.json
 - **Third-person model:** `RotationManager#tick` also eases `renderYaw`/`renderPitch` (and their `last*` fields) so the F5 body follows the server rotation without moving the first-person camera. On release, vanilla `tickNewAi` eases them back.
 - **GCD:** all deltas are snapped to the vanilla mouse step `(sens * 0.6 + 0.2)^3 * 1.2`. Remainders carry between ticks so slow turns still advance and every packet delta stays a multiple of the step. Keep `options.getMouseSensitivity()` as the only source.
 - **MoveFix:** `KeyboardInputMixin` injects at `RETURN` of `KeyboardInput#tick` and rotates `movementForward`/`movementSideways` by `serverYaw - playerYaw`. It must run after vanilla samples the keys but before `tickNewAi` copies the fields into `sidewaysSpeed`/`forwardSpeed`; injecting into `ClientPlayerEntity#tickMovement` would be too late for the copy.
-- **Raycasts:** `RotationManager#canSee` builds the direction from the current *server* rotation, raycasts the expanded hitbox, and only then checks block occlusion (honouring `wallRange`). Strict raycast must never use the camera rotation.
+- **Raycasts:** `RotationManager#canSee` builds the direction from the rotation the server already has, raycasts the exact hitbox within reach, and only then checks block occlusion (honouring `wallRange`). Never raycast a rotation that has not been sent yet: attack at `HEAD` before push (pre) or in the module tick *before* `RotationManager#tick` (post), never after.
+- **Vanilla attacks:** while silent rotations are active, `MinecraftClientMixin` suppresses vanilla entity attacks at `HEAD` of `doAttack`. The visible crosshair does not match the server look, so allowing both would send attacks with the wrong rotation and reset the cooldown mid-aura. Block attacks are unaffected.
+- **Sprint reset:** `ClientPlayerEntityAccess` exposes `lastSprinting`; keep it in sync when sending manual sprint packets or vanilla will emit duplicates or skip the restart.
 - **Reuse:** combat and world modules share this manager. Reset it with `release()` from `onDisable`, and push settings every tick; don't keep module-specific rotation state in a second place.
+
+### Anti-cheat behaviour to preserve
+
+These come from reading Grim, Matrix, Intave and Polar check docs, and they should not regress:
+
+- **Grim `Reach`/`Hitboxes`** re-raycast every attack using the current, last or last-last server look (3.0 + 0.0005 + movement threshold). The attack must be valid under the look the server has, not a future one.
+- **Grim `Post`/`PacketOrder`** prefer the vanilla order: attack the tick *before* the flying packet. Keep `Order` (pre-move) default. `PacketOrderB` wants an animation between attacks, so `Swing: None` is not fully safe.
+- **Grim `AimDuplicateLook` / `AimModulo360` / GCD processor**: only changed looks are sent (vanilla does this), yaw stays wrapped, and every delta is an exact sensitivity step.
+- **Matrix KillAura** checks rotation-at-attack, aim sync, shake, snap, sensitivity and acceleration; it also spawns a fake player. Aura must attack NPCs (Anti-Bot defaults off), jitter the aim, ramp the turn speed and use GCD.
+- **Intave `AttackRaytrace`** re-performs the client raytrace at 0.001-block accuracy (exact hitbox, 3.0 max). **Intave `Heuristics`** checks rotation against movement, so MoveFix must stay on and targets should be prioritized/limited.
+- **Polar** mitigates on combat heuristics; closest-point aim, gaussian micro-jitter, FOV limits and post-hit delay variance are the relevant behaviours.
+
+Never trade these for convenience without a setting and a preset entry.
 
 ## Rendering and performance rules
 

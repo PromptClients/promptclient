@@ -32,7 +32,8 @@ public final class RotationManager {
 	private static final float MAX_PITCH = 89.9f;
 	private static final float RENDER_EASE = 0.5f;
 	private static final float AIM_EASE_ANGLE = 30.0f;
-	private static final float JITTER_DEGREES = 0.08f;
+	private static final float JITTER_DEGREES = 0.3f;
+	private static final float BASE_JITTER_DEGREES = 0.04f;
 
 	private final Random random = new Random();
 
@@ -126,7 +127,7 @@ public final class RotationManager {
 			speedRamp = 0.0f;
 		}
 
-		Box box = target.getBoundingBox().expand(0.08);
+		Box box = target.getBoundingBox();
 		Vec3d eye = player.getEyePos();
 		double centerX = (box.minX + box.maxX) * 0.5;
 		double centerZ = (box.minZ + box.maxZ) * 0.5;
@@ -169,10 +170,9 @@ public final class RotationManager {
 		float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
 		float pitch = (float) -Math.toDegrees(Math.atan2(dy, horizontal));
 
-		if (microJitter) {
-			yaw += (float) random.nextGaussian() * JITTER_DEGREES;
-			pitch += (float) random.nextGaussian() * JITTER_DEGREES;
-		}
+		float jitter = microJitter ? JITTER_DEGREES : BASE_JITTER_DEGREES;
+		yaw += (float) random.nextGaussian() * jitter;
+		pitch += (float) random.nextGaussian() * jitter * 0.6f;
 
 		goalYaw = yaw;
 		goalPitch = MathHelper.clamp(pitch, -MAX_PITCH, MAX_PITCH);
@@ -340,7 +340,7 @@ public final class RotationManager {
 		Vec3d eye = player.getEyePos();
 		Vec3d direction = Vec3d.fromPolar(serverPitch, serverYaw);
 		Vec3d end = eye.add(direction.multiply(reach));
-		Optional<Vec3d> hit = target.getBoundingBox().expand(0.08).raycast(eye, end);
+		Optional<Vec3d> hit = target.getBoundingBox().raycast(eye, end);
 
 		if (hit.isEmpty()) {
 			return false;
